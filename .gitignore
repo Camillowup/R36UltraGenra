@@ -1,0 +1,6 @@
+r36genra
+r36genra_test
+testausgabe/
+*.o
+projekt.r36*
+log.txt
