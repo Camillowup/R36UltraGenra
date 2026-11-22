@@ -14,7 +14,7 @@ using Col = uint32_t;  // 0xAARRGGBB
 inline Col rgb(uint32_t hex, int a = 255) { return (uint32_t(a) << 24) | (hex & 0xFFFFFF); }
 Col mix(Col a, Col b, float t);
 
-enum FontId { XS, S, M, L };
+enum FontId { XS, S, M, D, L };
 
 struct Canvas {
     std::vector<uint32_t> px;

@@ -5,7 +5,7 @@
 
 namespace gfx {
 
-static const FontData* fonts[] = {&font_XS, &font_S, &font_M, &font_L};
+static const FontData* fonts[] = {&font_XS, &font_S, &font_M, &font_D, &font_L};
 
 // UTF-8 lesen und Glyph-Index bestimmen
 static int nextGlyph(const std::string& s, size_t& i) {

@@ -25,17 +25,18 @@ jobs:
       - name: Bauen fuer ARM64
         run: |
           docker run --rm --platform linux/arm64 -v "$PWD":/src -w /src ubuntu:18.04 bash -c \
-            "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends g++ make libsdl2-dev >/dev/null && make clean && make r36genra && strip r36genra && file r36genra || true"
+            "apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq --no-install-recommends g++ make libsdl2-dev >/dev/null && make clean && make -j4 r36genra && strip r36genra && file r36genra || true"
           ls -la r36genra
 
       - name: Paket zusammenstellen
         run: |
-          mkdir -p paket/ports/r36genra/samples/{kick,clap,hat,perc,keys}
+          mkdir -p paket/ports/r36genra/samples/{kick,clap,hat,perc,sample}
           cp r36genra paket/ports/r36genra/
           cp "port/R36 GENRA.sh" paket/ports/
           cp LICENSE paket/ports/r36genra/
+          cp third_party/eurorack/stmlib/LICENSE paket/ports/r36genra/LICENSE-plaits-stmlib.txt
           cp docs/ANLEITUNG.md paket/ports/r36genra/ANLEITUNG.txt
-          for d in kick clap hat perc keys; do echo "Eigene WAV-Dateien hier ablegen." > paket/ports/r36genra/samples/$d/HIER_WAVS.txt; done
+          for d in kick clap hat perc sample; do echo "Eigene WAV-Dateien hier ablegen." > paket/ports/r36genra/samples/$d/HIER_WAVS.txt; done
 
       - uses: actions/upload-artifact@v4
         with:

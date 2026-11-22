@@ -1,6 +1,8 @@
 r36genra
 r36genra_test
 testausgabe/
+build/
 *.o
 projekt.r36*
+presets_eigen.bin
 log.txt

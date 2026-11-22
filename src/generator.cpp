@@ -1,4 +1,5 @@
 #include "generator.h"
+#include "presets.h"
 #include <algorithm>
 
 const char* const kGenreNames[NGENRE] = {"BOOM BAP", "LO-FI", "DEEP HOUSE", "TECHNO", "MINIMAL",
@@ -47,16 +48,107 @@ static uint8_t lenToDecay(int steps) { return uint8_t(std::clamp((steps - 1) * 1
 
 void initProject(Project& p) {
     p = Project();
-    for (int t = 0; t < NT; t++) {
-        p.tr[t] = Track();
-    }
+    for (int t = 0; t < NT; t++) p.tr[t] = Track();
     p.tr[T_HAT].vol = 62;
     p.tr[T_PERC].vol = 60;
-    p.tr[T_PAD] = Track(); p.tr[T_PAD].vol = 55; p.tr[T_PAD].decay = 100; p.tr[T_PAD].cutoff = 62; p.tr[T_PAD].rev = 45;
-    p.tr[T_BASS].vol = 78; p.tr[T_BASS].decay = 7; p.tr[T_BASS].cutoff = 45;
-    p.tr[T_LEAD].vol = 52; p.tr[T_LEAD].decay = 13; p.tr[T_LEAD].cutoff = 70; p.tr[T_LEAD].dly = 35; p.tr[T_LEAD].rev = 20;
-    p.tr[T_KEYS].vol = 58; p.tr[T_KEYS].decay = 13; p.tr[T_KEYS].cutoff = 100; p.tr[T_KEYS].rev = 25;
     p.tr[T_CLAP].rev = 15;
+    p.tr[T_PAD].vol = 60;
+    p.tr[T_BASS].vol = 78;
+    p.tr[T_LEAD].vol = 58;
+    p.tr[T_SAMPLE].vol = 62;
+    for (int t = T_PAD; t <= T_SAMPLE; t++) {
+        int n;
+        const Preset* ps = presetList(t, n);
+        if (ps) applyPreset(p.tr[t], ps[0]);
+        p.tr[t].preset = 0;
+    }
+}
+
+// Noten einer Spur in eine Variante schreiben
+static void genTrack(Project& p, int t, int v, Rng& r, const Genre& g, const int* prog) {
+    Pattern& pat = p.pat[p.curPat];
+    int len = pat.len;
+    auto chordAt = [&](int s) {
+        if (g.pad == 2) return (s % 16) >= 8 ? prog[1] : prog[0];
+        return ((s / 16) & 1) ? prog[1] : prog[0];
+    };
+    Step* row = pat.s[t][v];
+    for (int s = 0; s < MAXSTEPS; s++) row[s] = Step();
+    for (int s = 0; s < len; s++) {
+        Step& st = row[s];
+        int ps = s % 16;
+        if (t < NDRUM) {
+            float pr = (g.drum[t][ps] - '0') / 9.f;
+            if (s >= 16 && pr > 0 && pr < 1) pr *= 0.6f + r.f() * 0.8f;
+            if (r.f() < pr) {
+                st.on = 1;
+                st.vel = uint8_t(pr >= 0.99f ? 100 : 60 + r.i(40));
+                if (t == T_HAT && pr < 0.5f) st.vel = uint8_t(45 + r.i(25));
+                // ab und zu Hi-Hat-Ratchets bei schnellen Genres
+                if (t == T_HAT && g.bpmLo >= 120 && r.f() < 0.06f) { st.repeat = uint8_t(2 + r.i(2)); st.lockMask |= 1 << P_REPEAT; }
+            }
+        } else if (t == T_BASS) {
+            float pr = (g.bass[ps] - '0') / 9.f;
+            if (r.f() < pr) {
+                st.on = 1;
+                int deg = chordAt(s);
+                float k = r.f();
+                if (k > 0.7f) deg += 4;
+                else if (k > 0.55f) deg += 7;
+                st.note = uint8_t(degNote(p.root, p.scale, deg, 36));
+                st.vel = uint8_t(80 + r.i(21));
+                if (r.f() < 0.2f) st.vel = 112;  // Akzent
+            }
+        } else if (t == T_PAD) {
+            if (g.pad == 0) continue;
+            bool two = g.pad == 2;
+            if (ps == 0 || (two && ps == 8)) {
+                st.on = 1;
+                st.note = uint8_t(degNote(p.root, p.scale, chordAt(s), 48));
+                st.lockMask |= 1 << P_DECAY;
+                st.decay = lenToDecay(two ? 8 : 16);
+                st.vel = 85;
+            }
+        } else if (t == T_SAMPLE) {
+            float pr = (g.keys[ps] - '0') / 9.f;
+            if (r.f() < pr) {
+                st.on = 1;
+                st.chord = 1;
+                st.note = uint8_t(degNote(p.root, p.scale, chordAt(s), 48));
+                st.vel = uint8_t(75 + r.i(20));
+            }
+        } else if (t == T_LEAD) {
+            float pr = g.lead / 18.f * ((ps % 2) ? 0.6f : 1.2f);
+            if (r.f() < pr) {
+                st.on = 1;
+                static const int tones[7] = {0, 2, 4, 0, 4, 6, 7};
+                st.note = uint8_t(degNote(p.root, p.scale, chordAt(s) + tones[r.i(7)], 60));
+                st.vel = uint8_t(70 + r.i(30));
+            }
+        }
+    }
+}
+
+// Varianten B–D aus A ableiten: B leicht veraendert, C dichter (Fill), D ausgeduennt (Break)
+static void deriveVariants(Project& p, int t, Rng& r, const Genre& g, const int* prog) {
+    Pattern& pat = p.pat[p.curPat];
+    Step* A = pat.s[t][0];
+    Step alt[MAXSTEPS];
+    Rng r2{r.s ^ 0x9E3779B9u};
+    r2.f();
+    // Hilfsmuster in Variante 1 erzeugen und wieder herauskopieren
+    genTrack(p, t, 1, r2, g, prog);
+    for (int s = 0; s < MAXSTEPS; s++) alt[s] = pat.s[t][1][s];
+    for (int s = 0; s < MAXSTEPS; s++) {
+        Step& B = pat.s[t][1][s];
+        Step& C = pat.s[t][2][s];
+        Step& D = pat.s[t][3][s];
+        B = r.f() < 0.75f ? A[s] : alt[s];
+        C = A[s];
+        if (!C.on && alt[s].on && r.f() < 0.5f) C = alt[s];
+        D = A[s];
+        if (D.on && (s % 8) != 0 && r.f() < 0.5f) D.on = 0;
+    }
 }
 
 void generate(Project& p, int track, uint32_t seed) {
@@ -64,79 +156,24 @@ void generate(Project& p, int track, uint32_t seed) {
     r.f();
     const Genre& g = G[p.genre % NGENRE];
     Pattern& pat = p.pat[p.curPat];
-    int len = pat.len;
+    static const int progs[6][2] = {{0, 5}, {0, 3}, {5, 6}, {0, 6}, {3, 4}, {0, 2}};
     if (track < 0) {
         p.bpm = uint16_t(g.bpmLo + r.i(g.bpmHi - g.bpmLo + 1));
         p.swing = uint8_t(g.swing);
         p.scale = uint8_t(g.scale);
         p.tr[T_BASS].decay = lenToDecay(g.bassLen);
-        p.tr[T_KEYS].decay = lenToDecay(g.keysLen);
+        p.tr[T_SAMPLE].decay = lenToDecay(g.keysLen);
+        pat.reserved[0] = uint8_t(r.i(6));  // Akkordfolge des Patterns
     }
-    // Akkordfolge fuer dieses Pattern: Stufen fuer erste und zweite Takthaelfte
-    static const int progs[6][2] = {{0, 5}, {0, 3}, {5, 6}, {0, 6}, {3, 4}, {0, 2}};
-    // Gleicher Akkord fuer alle Spuren: aus dem Seed des Patterns, nicht der Spur
-    Rng rc{uint32_t(p.curPat * 7919 + p.genre * 104729 + (seed >> 8)) | 1};
-    rc.f();
-    const int* prog = progs[rc.i(6)];
-    // Ein Akkord pro Takt (bzw. zwei bei Pad-Modus 2); bei Mustern ueber 16 Steps wechselt Takt 2 auf den zweiten Akkord
-    auto chordAt = [&](int s) {
-        if (g.pad == 2) return (s % 16) >= 8 ? prog[1] : prog[0];
-        return ((s / 16) & 1) ? prog[1] : prog[0];
-    };
-
+    const int* prog = progs[pat.reserved[0] % 6];
     for (int t = 0; t < NT; t++) {
         if (track >= 0 && t != track) continue;
-        for (int s = 0; s < MAXSTEPS; s++) pat.s[t][s] = Step();
-        for (int s = 0; s < len; s++) {
-            Step& st = pat.s[t][s];
-            int ps = s % 16;
-            if (t < NDRUM) {
-                float pr = (g.drum[t][ps] - '0') / 9.f;
-                // ab Takt 2 leicht variieren
-                if (s >= 16 && pr > 0 && pr < 1) pr *= 0.6f + r.f() * 0.8f;
-                if (r.f() < pr) {
-                    st.on = 1;
-                    st.vel = uint8_t(pr >= 0.99f ? 100 : 60 + r.i(40));
-                    if (t == T_HAT && pr < 0.5f) st.vel = uint8_t(45 + r.i(25));
-                }
-            } else if (t == T_BASS) {
-                float pr = (g.bass[ps] - '0') / 9.f;
-                if (r.f() < pr) {
-                    st.on = 1;
-                    int deg = chordAt(s);
-                    float k = r.f();
-                    if (k > 0.7f) deg += 4;       // Quinte
-                    else if (k > 0.55f) deg += 7; // Oktave
-                    st.note = uint8_t(degNote(p.root, p.scale, deg, 36));
-                    st.vel = uint8_t(80 + r.i(21));
-                }
-            } else if (t == T_PAD) {
-                if (g.pad == 0) continue;
-                bool two = g.pad == 2;
-                if (ps == 0 || (two && ps == 8)) {
-                    st.on = 1;
-                    st.note = uint8_t(degNote(p.root, p.scale, chordAt(s), 48));
-                    st.lockMask |= 1 << P_DECAY;
-                    st.decay = lenToDecay(two ? 8 : 16);
-                    st.vel = 85;
-                }
-            } else if (t == T_KEYS) {
-                float pr = (g.keys[ps] - '0') / 9.f;
-                if (r.f() < pr) {
-                    st.on = 1;
-                    st.chord = 1;
-                    st.note = uint8_t(degNote(p.root, p.scale, chordAt(s), 48));
-                    st.vel = uint8_t(75 + r.i(20));
-                }
-            } else if (t == T_LEAD) {
-                float pr = g.lead / 18.f * ((ps % 2) ? 0.6f : 1.2f);
-                if (r.f() < pr) {
-                    st.on = 1;
-                    static const int tones[7] = {0, 2, 4, 0, 4, 6, 7};
-                    st.note = uint8_t(degNote(p.root, p.scale, chordAt(s) + tones[r.i(7)], 60));
-                    st.vel = uint8_t(70 + r.i(30));
-                }
-            }
+        if (track < 0) {
+            genTrack(p, t, 0, r, g, prog);
+            deriveVariants(p, t, r, g, prog);
+            pat.var[t] = 0;
+        } else {
+            genTrack(p, t, pat.var[t] & 3, r, g, prog);
         }
     }
 }

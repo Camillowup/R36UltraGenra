@@ -74,7 +74,7 @@ int main(int argc, char** argv) {
     SDL_free(base);
     if (!dir.empty() && dir.back() == '/') dir.pop_back();
     setvbuf(stdout, nullptr, _IOLBF, 0);
-    printf("R36 GENRA v0.1, Ordner: %s\n", dir.c_str());
+    printf("R36 GENRA v0.2, Ordner: %s\n", dir.c_str());
 
     if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO | SDL_INIT_JOYSTICK | SDL_INIT_GAMECONTROLLER) != 0) {
         printf("SDL_Init: %s\n", SDL_GetError());
@@ -100,12 +100,12 @@ int main(int argc, char** argv) {
 
     // Audio
     SDL_AudioSpec want{}, have{};
-    want.freq = 44100;
+    want.freq = 48000;
     want.format = AUDIO_F32SYS;
     want.channels = 2;
     want.samples = 512;
     want.callback = audioCb;
-    app.init(dir, 44100);
+    app.init(dir, 48000);
     SDL_AudioDeviceID dev = SDL_OpenAudioDevice(nullptr, 0, &want, &have, 0);
     if (!dev) printf("Audio: %s\n", SDL_GetError());
     else { printf("Audio: %d Hz, Puffer %d\n", have.freq, have.samples); SDL_PauseAudioDevice(dev, 0); }
@@ -149,6 +149,8 @@ int main(int argc, char** argv) {
                     case SDLK_2: keys[B_R2] = d; break;
                     case SDLK_RSHIFT: case SDLK_BACKSPACE: keys[B_SELECT] = d; break;
                     case SDLK_RETURN: keys[B_START] = d; break;
+                    case SDLK_e: keys[B_L3] = d; break;
+                    case SDLK_r: keys[B_R3] = d; break;
                     case SDLK_ESCAPE: if (d) running = false; break;
                     default: break;
                 }
